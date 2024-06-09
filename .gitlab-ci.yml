@@ -1,0 +1,63 @@
+image: golang:1.18.10-alpine3.17
+
+before_script:
+  - echo ':before_script'
+  - cat /etc/os-release
+  - ls -la
+  - apk update && apk add git
+  - echo 'end :before_script'
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+
+stages:
+  - test
+  - build
+  - deploy
+
+test:
+  stage: test
+  script:
+    - CGO_ENABLED=0 go test ./... -coverprofile=coverage-report.out
+    - go tool cover -html=coverage-report.out -o coverage-report.html
+    - go tool cover -func=coverage-report.out
+  artifacts:
+    paths:
+      - coverage-report.html
+    expire_in: 1 hour
+  coverage: "/\\(statements\\)\\s+\\d+.?\\d+%/"
+
+linter:
+  stage: build
+  allow_failure: true
+  script:
+    - apk add build-base
+    - go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.45.2
+    - golangci-lint run --timeout 10m --verbose ./...
+
+build:
+  stage: build
+  script:
+    - go mod tidy
+    - go build -o bin/changelog-generator -v .
+  artifacts:
+    paths:
+      - bin/changelog-generator
+    expire_in: 1 hour
+
+pages:
+  stage: deploy
+  script:
+    - echo 'Cleaning old pages'
+    - rm -rf public
+    - ls -la
+    - mkdir -p public/test-report && cp coverage-report.html public/test-report
+    - echo 'Public directory content after copying files'
+    - ls -la ./public
+  artifacts:
+    paths:
+      - public
+    expire_in: 1 hour
+  only:
+    - master
+    - develop
